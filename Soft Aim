@@ -1,0 +1,117 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+
+-- Settings
+local MaxDistance = 1000 -- Maximum distance to check for players
+local RaycastParams = RaycastParams.new()
+RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+RaycastParams.IgnoreWater = true
+local ThirdPersonThreshold = 5 -- Distance to determine third-person view
+
+-- FOV Circle settings for both camlock and silent aim
+local FOVRadius = 125 -- Adjust the radius of the FOV circle
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Radius = FOVRadius
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Thickness = 2
+FOVCircle.Transparency = 1
+FOVCircle.Filled = false
+
+-- Function to check if the player is in third-person mode
+local function isThirdPerson()
+    local character = LocalPlayer.Character
+    if character and character:FindFirstChild("Head") then
+        local distance = (Camera.CFrame.Position - character.Head.Position).Magnitude
+        return distance > ThirdPersonThreshold
+    end
+    return false
+end
+
+-- Function to get the nearest visible player within the FOV circle
+local function GetNearestVisiblePlayer()
+    local closestPlayer = nil
+    local closestDistance = MaxDistance
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local character = player.Character
+            local humanoidRootPart = character.HumanoidRootPart
+            local distance = (humanoidRootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+
+            if distance < closestDistance then
+                -- Raycast to check if player is visible
+                local rayDirection = (humanoidRootPart.Position - Camera.CFrame.Position).Unit * distance
+                local rayResult = workspace:Raycast(Camera.CFrame.Position, rayDirection, RaycastParams)
+                
+                if rayResult and rayResult.Instance:IsDescendantOf(character) then
+                    -- Check if the player is within the FOV Circle
+                    local headPosition, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+                    local mousePosition = UserInputService:GetMouseLocation()
+                    local distanceFromMouse = (Vector2.new(headPosition.X, headPosition.Y) - mousePosition).Magnitude
+                    
+                    if onScreen and distanceFromMouse <= FOVRadius then
+                        closestPlayer = player
+                        closestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+-- Update the FOV Circle position to follow the mouse
+local function updateFOVCircle()
+    local mousePosition = UserInputService:GetMouseLocation()
+    FOVCircle.Position = mousePosition -- Centers the FOV circle at the mouse
+end
+
+-- Silent Aim functionality
+local function silentAimAtTarget(target)
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        -- Adjust the camera's direction silently to aim at the target
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Character.HumanoidRootPart.Position)
+    end
+end
+
+-- Camlock functionality
+local function camlockAtTarget(target)
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        -- Lock the camera onto the target's HumanoidRootPart
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Character.HumanoidRootPart.Position)
+    end
+end
+
+-- Enable or disable camlock with a key press (e.g., "L" to toggle)
+local camlockEnabled = false
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.L then
+        camlockEnabled = not camlockEnabled
+    end
+end)
+
+-- Main loop to handle camera control
+RunService.RenderStepped:Connect(function()
+    updateFOVCircle() -- Update the FOV circle position each frame
+
+    local nearestPlayer = GetNearestVisiblePlayer()
+
+    if nearestPlayer then
+        if isThirdPerson() then
+            if camlockEnabled then
+                camlockAtTarget(nearestPlayer) -- Use camlock in third-person
+            end
+        else
+            silentAimAtTarget(nearestPlayer) -- Use silent aim in first-person
+        end
+    end
+end)
+
+-- Cleanup on game exit
+game.Players.LocalPlayer.OnTeleport:Connect(function()
+    FOVCircle:Remove()
+end)
